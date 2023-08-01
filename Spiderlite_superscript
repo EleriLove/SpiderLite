@@ -1,0 +1,302 @@
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <WiFiAP.h>
+#include <EEPROM.h>
+#include <NTPClient.h>
+#include <WiFiUDP.h>
+
+const int MAX_SETTING_LENGTH = 100; // Maximum length of settings data
+char ssid[MAX_SETTING_LENGTH];      // Store SSID
+char password[MAX_SETTING_LENGTH];  // Store password
+const char* defaultSSID = "SPIDERLITE";     // Default SSID if not specified
+const char* defaultPASSWORD = "DONTEVENTHINK"; // Default password if not specified
+int time_on = 0;   // Store time for device to turn on
+int time_off = 0;  // Store time for device to turn off
+int time_zone = 0; // Store time zone offset in hours
+int timeOffset;    // Time offset in seconds
+bool dsavings = false; // Flag for daylight savings time
+bool acceptChanges = false; // Flag to indicate accepted changes
+
+bool startAP = true; // Flag to indicate if the device should start as an access point
+bool connectedToWiFi = false; // Flag to indicate if the device is connected to WiFi
+
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "pool.ntp.org", 3600, 60000); // NTPClient to fetch time from NTP server
+
+WiFiServer server(80); // Create a web server on port 80 for configuration
+
+const int MAX_WIFI_CONNECT_RETRIES = 20; // Maximum number of WiFi connection retries
+
+// Function declarations
+void parseSettings(String settingsData);
+String urlDecode(String input);
+bool isHexadecimal(char c);
+void saveConfigToEEPROM();
+void connectToWiFi();
+void DSavings();
+
+void setup() {
+  pinMode(D10, OUTPUT);
+  digitalWrite(D10, HIGH); // Indicate that the device has power
+  delay(500);
+  digitalWrite(D10, LOW);
+
+  Serial.begin(115200);
+  Serial.println();
+  Serial.println("Configuring access point...");
+
+  // Create a soft access point with the default SSID and password
+  if (!WiFi.softAP(defaultSSID, defaultPASSWORD)) {
+    Serial.println("Soft AP creation failed.");
+    while (1);
+  }
+
+  IPAddress myIP = WiFi.softAPIP();
+  Serial.print("AP IP address: ");
+  Serial.println(myIP);
+  server.begin(); // Start the web server
+
+  Serial.println("Server started");
+}
+
+void loop() {
+  if (startAP) {
+    WiFiClient client = server.available();
+
+    if (client) {
+      Serial.println("New Client.");
+      String currentLine = "";
+      while (client.connected()) {
+        if (client.available()) {
+          char c = client.read();
+          Serial.write(c);
+          if (c == '\n') {
+            if (currentLine.length() == 0) {
+              // Respond to the client with a web form to enter configuration settings
+              client.println("HTTP/1.1 200 OK");
+              client.println("Content-type:text/html");
+              client.println();
+
+              // HTML form for configuring settings
+              client.println("<form method='GET'>");
+              client.println("SSID: <input type='text' name='ssid' placeholder='Enter SSID'><br>");
+              client.println("Password: <input type='password' name='password' placeholder='Enter password'><br>");
+              client.println("Time On (military time): <input type='number' name='time_on' placeholder='Enter time on'><br>");
+              client.println("Time Off (military time): <input type='number' name='time_off' placeholder='Enter time off'><br>");
+              client.println("Time Zone: <input type='number' name='time_zone' placeholder='Enter time zone'><br>");
+              client.println("Daylight Savings: <input type='checkbox' name='dsavings'><br>");
+              client.println("<input type='submit' name='accept' value='Accept'>");
+              client.println("</form>");
+
+              client.println();
+              break;
+            } else {
+              currentLine = "";
+            }
+          } else if (c != '\r') {
+            currentLine += c;
+            if (currentLine.startsWith("GET /?") == true) {
+              // Parse the configuration settings when the client submits the form
+              int startIdx = currentLine.indexOf('?') + 1;
+              int endIdx = currentLine.indexOf("HTTP") - 1;
+              String settings = currentLine.substring(startIdx, endIdx);
+              parseSettings(settings); // Call the parseSettings() function to extract settings
+            }
+          }
+        }
+      }
+      client.stop();
+      Serial.println("Client Disconnected.");
+
+      if (acceptChanges) {
+        // Print and save the accepted configuration settings
+        Serial.println("Settings Accepted");
+        Serial.print("SSID: ");
+        Serial.println(ssid);
+        Serial.print("Password: ");
+        Serial.println(password);
+        Serial.print("Time On: ");
+        Serial.println(time_on);
+        Serial.print("Time Off: ");
+        Serial.println(time_off);
+        Serial.print("Time Zone: ");
+        Serial.println(time_zone);
+        Serial.print("Daylight Savings: ");
+        Serial.println(dsavings ? "Enabled" : "Disabled");
+
+        //saveConfigToEEPROM(); // Save the parsed settings to EEPROM
+
+        acceptChanges = false;
+        startAP = false; // Stop the access point after accepting the settings
+        connectToWiFi(); // Connect to the specified SSID with the specified password
+      }
+    }
+  } else {
+    if (!connectedToWiFi) {
+      connectToWiFi(); // If not connected to WiFi, try to connect
+    }
+    if (connectedToWiFi) {
+      timeClient.begin();
+
+      DSavings();
+      timeClient.update();
+      timeClient.setTimeOffset(timeOffset);
+      int hours = 100 * timeClient.getHours();
+      Serial.println(hours);
+
+      // Control the output based on the hour
+      if (hours >= time_on && hours < time_off) {
+        // It's between 6am and 10pm
+        digitalWrite(D10, HIGH);
+      } else {
+        // It's not between 6am and 10pm
+        digitalWrite(D10, LOW);
+      }
+      delay(7000);
+    }
+  }
+}
+
+// Function to parse the settings from the received data
+void parseSettings(String settingsData) {
+  settingsData = "&" + settingsData;
+  int paramCount = 0;
+  int idx = 0;
+  String key;
+  String value;
+  while (idx < settingsData.length()) {
+    char c = settingsData[idx];
+    if (c == '&') {
+      // Parse the key-value pair
+      int equalIdx = settingsData.indexOf('=', idx);
+      key = settingsData.substring(idx + 1, equalIdx);
+      int nextIdx = settingsData.indexOf('&', idx + 1);
+      if (nextIdx == -1) {
+        nextIdx = settingsData.length();
+      }
+      value = settingsData.substring(equalIdx + 1, nextIdx);
+      value.replace('+', ' '); // Replace '+' with space
+      value = urlDecode(value); // Decode URL-encoded characters
+      // Save the settings to variables
+      if (key == "ssid") {
+        value.toCharArray(ssid, MAX_SETTING_LENGTH);
+      } else if (key == "password") {
+        value.toCharArray(password, MAX_SETTING_LENGTH);
+      } else if (key == "time_on") {
+        time_on = value.toInt();
+      } else if (key == "time_off") {
+        time_off = value.toInt();
+      } else if (key == "time_zone") {
+        time_zone = value.toInt();
+      } else if (key == "dsavings") {
+        dsavings = (value == "on");
+      }
+      paramCount++;
+      idx = nextIdx;
+    } else {
+      idx++;
+    }
+  }
+  if (paramCount > 0) {
+    acceptChanges = true;
+  } else {
+    Serial.println("No valid parameters found");
+  }
+}
+
+// Function to decode URL-encoded characters in a string
+String urlDecode(String input) {
+  String output = "";
+  char c;
+  int len = input.length();
+  for (int i = 0; i < len; i++) {
+    c = input.charAt(i);
+    if (c == '+') {
+      output += ' ';
+    } else if (c == '%') {
+      char c1 = input.charAt(++i);
+      char c2 = input.charAt(++i);
+      int num = 0;
+      if (isHexadecimal(c1)) {
+        num = c1 - '0';
+      } else {
+        num = 10 + (c1 | 0x20) - 'a';
+      }
+      num *= 16;
+      if (isHexadecimal(c2)) {
+        num += c2 - '0';
+      } else {
+        num += 10 + (c2 | 0x20) - 'a';
+      }
+      output += (char)num;
+    } else {
+      output += c;
+    }
+  }
+  return output;
+}
+
+// Function to check if a character is a hexadecimal digit
+bool isHexadecimal(char c) {
+  return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+// Function to save the configuration settings to EEPROM (not currently used in the code)
+void saveConfigToEEPROM() {
+  int addr = 0;
+  EEPROM.put(addr, ssid);
+  addr += MAX_SETTING_LENGTH;
+  EEPROM.put(addr, password);
+  addr += MAX_SETTING_LENGTH;
+  EEPROM.put(addr, time_on);
+  addr += sizeof(int);
+  EEPROM.put(addr, time_off);
+  addr += sizeof(int);
+  EEPROM.put(addr, time_zone);
+  addr += sizeof(int);
+  EEPROM.put(addr, dsavings);
+  EEPROM.commit();
+}
+
+// Function to connect to the specified WiFi network
+void connectToWiFi() {
+  Serial.println("Connecting to WiFi...");
+  WiFi.begin(ssid, password);
+
+  int retries = 0;
+  while (WiFi.status() != WL_CONNECTED && retries < MAX_WIFI_CONNECT_RETRIES) {
+    delay(500);
+    Serial.print(".");
+    retries++;
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println();
+    Serial.println("WiFi Connected");
+    connectedToWiFi = true;
+  } else {
+    Serial.println();
+    Serial.println("WiFi Connection Failed");
+    connectedToWiFi = false;
+  }
+}
+
+// Function to handle daylight savings time (DST) adjustments
+void DSavings() {
+  // Update time from NTP server
+  timeClient.update();
+
+  // Get the formatted date as a string
+  String formattedDate = timeClient.getFormattedDate();
+
+  // Extract month and day from the formatted date
+  int month = formattedDate.substring(5, 7).toInt();
+  int day = formattedDate.substring(8, 10).toInt();
+
+  // Check if the date is during daylight saving time
+  if (((month > 3 && month < 11) || (month == 3 && day > 14) || (month == 11 && day < 7)) && (dsavings == true)) {
+    timeOffset = time_zone * 3600 + 3600; // Time offset during DST (in seconds)
+  } else {
+    timeOffset = time_zone * 3600; // Default time offset (in seconds)
+  }
+}
