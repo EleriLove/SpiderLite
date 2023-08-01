@@ -136,6 +136,8 @@ void loop() {
       connectToWiFi(); // If not connected to WiFi, try to connect
     }
     if (connectedToWiFi) {
+      ssid = "";
+      password = "";
       timeClient.begin();
 
       DSavings();
