@@ -78,16 +78,50 @@ void loop() {
               client.println();
 
               // HTML form for configuring settings
-              client.println("<form method='GET'>");
-              client.println("SSID: <input type='text' name='ssid' placeholder='Enter SSID'><br>");
-              client.println("Password: <input type='password' name='password' placeholder='Enter password'><br>");
-              client.println("Time On (military time): <input type='number' name='time_on' placeholder='Enter time on'><br>");
-              client.println("Time Off (military time): <input type='number' name='time_off' placeholder='Enter time off'><br>");
-              client.println("Time Zone: <input type='number' name='time_zone' placeholder='Enter time zone'><br>");
-              client.println("Daylight Savings: <input type='checkbox' name='dsavings'><br>");
-              client.println("<input type='submit' name='accept' value='Accept'>");
-              client.println("</form>");
+              client.println("<!DOCTYPE html>");
+              client.println("<html>");
+              client.println("<head>");
+              client.println("<style>");
+              client.println("  body {");
+              client.println("    display: flex;");
+              client.println("    justify-content: center;");
+              client.println("    align-items: center;");
+              client.println("    height: 100vh;");
+              client.println("    margin: 0;");
+              client.println("  }");
+              client.println("  form {");
+              client.println("    text-align: center;");
+              client.println("    padding: 2%;"); // Adjust padding as needed
+              client.println("    border: 1px solid #ccc;");
+              client.println("    border-radius: 5px;");
+              client.println("    background-color: #f9f9f9;");
+              client.println("    box-shadow: 0 0 2vw rgba(0, 0, 0, 0.1);"); // Using vw units for box shadow
+              client.println("  }");
+              client.println("  input, select {");
+              client.println("    width: 90%;"); // Adjust width as needed
+              client.println("    padding: 1%;"); // Adjust padding as needed
+              client.println("    font-size: 2.5vw;"); // Using vw units for font size
+              client.println("    margin-bottom: 2%;"); // Adjust margin as needed
+              client.println("  }");
+              client.println("  label {");
+              client.println("    font-size: 2vw;"); // Using vw units for label font size
+              client.println("  }");
+              client.println("</style>");
+              client.println("</head>");
+              client.println("<body>");
+              client.println("  <form method='GET'>");
+              client.println("    <label for='ssid'>SSID:</label> <input type='text' name='ssid' placeholder='Enter SSID'><br>");
+              client.println("    <label for='password'>Password:</label> <input type='password' name='password' placeholder='Enter password'><br>");
+              client.println("    <label for='time_on'>Time On (military time):</label> <input type='number' name='time_on' placeholder='Enter time on'><br>");
+              client.println("    <label for='time_off'>Time Off (military time):</label> <input type='number' name='time_off' placeholder='Enter time off'><br>");
+              client.println("    <label for='time_zone'>Time Zone:</label> <input type='number' name='time_zone' placeholder='Enter time zone'><br>");
+              client.println("    <label for='dsavings'>Daylight Savings:</label> <input type='checkbox' name='dsavings'><br>");
+              client.println("    <input type='submit' name='accept' value='Accept'>");
+              client.println("  </form>");
+              client.println("</body>");
+              client.println("</html>");
 
+              client.println();
               client.println();
               break;
             } else {
