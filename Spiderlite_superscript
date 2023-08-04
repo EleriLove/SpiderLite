@@ -122,7 +122,6 @@ void loop() {
               client.println("</html>");
 
               client.println();
-              client.println();
               break;
             } else {
               currentLine = "";
